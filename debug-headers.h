@@ -5,6 +5,9 @@
 #ifndef IPK2_DEBUG_HEADERS_H
 #define IPK2_DEBUG_HEADERS_H
 
+#define MAX(a,b) a>b?a:b
+#define MIN(a,b) a<b?a:b
+
 #ifndef IPK2_NO_DEBUG //if debug is not turned off
 
 #define SERVER_PORT 115

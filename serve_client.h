@@ -6,6 +6,7 @@
 #define IPK2_SERVE_CLIENT_H
 
 #include <string>
+#include <map>
 
 //Structure with all the client info needed by the serving function
 typedef struct{
@@ -15,6 +16,7 @@ typedef struct{
 } client_info_t;
 
 //Client serving function
-int serve_client(const client_info_t *clientInfo);
+int serve_client(const client_info_t *clientInfo, const std::map<std::string, std::string>& user_db);
+
 
 #endif //IPK2_SERVE_CLIENT_H

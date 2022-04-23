@@ -5,6 +5,7 @@
 #include <iostream>
 #include <netinet/in.h>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -13,6 +14,9 @@
 #include <net/if.h>
 #include <netdb.h>
 #include <getopt.h>
+#include <sstream>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "debug-headers.h"
 
@@ -145,16 +149,142 @@ int main(int argc, char ** argv){
     memset(recv_buffer, 0, BUFFER_LEN);
     memset(send_buffer, 0, BUFFER_LEN);
 
+    std::string last_response{};
+    while(read(connection_socket, recv_buffer, BUFFER_LEN-1) > 0){
+        std::cout << recv_buffer << std::endl; // print prompt from server
+        last_response = recv_buffer;
 
-    //first, receive response
-    if(read(connection_socket, recv_buffer, BUFFER_LEN) == 0){
-        std::cerr << "Server closed connection unexpectedly" << std::endl;
-        close(connection_socket);
-        exit(EXIT_FAILURE);
+        //get user input
+    get_input:
+        std::cout << ">?" << std::flush;
+        std::string user_command{};
+        std::getline(std::cin, user_command);
+
+        //when retrieving file, ask for local name and then save to file
+        if (user_command.substr(0,4) == "SEND" &&!(last_response[0] == '+' || last_response[0]=='-'|| last_response[0] == '!'|| last_response.empty())){
+
+            std::string local_name{};
+            std::cout << "Enter local name for retrieved file: " << std::flush;
+            std::getline(std::cin, local_name);
+
+            send(connection_socket, user_command.c_str(), strlen(user_command.c_str())+1, 0);
+
+            long size = strtol(last_response.c_str(), nullptr, 0);
+            long org_size = size;
+            FILE *local_file = fopen(local_name.c_str(), "w");
+            while(size>0){
+
+                std::cout<< "DOWNLOADING: Done " << (int)((((double)org_size-(double)size)/(double)org_size)*100)<<"%   \r" << std::flush;
+                size_t actually_allocd = MIN(1000000,size);
+                char * file_buffer = (char *) calloc(actually_allocd, sizeof(char ));
+                if(!file_buffer){
+                    perror("Failed to allocate buffer");
+                    exit(EXIT_FAILURE);
+                }
+                memset(file_buffer,0,actually_allocd);
+                long bytes_read = read(connection_socket,file_buffer,actually_allocd);
+                fwrite(file_buffer, sizeof(char), bytes_read, local_file);
+                size -= bytes_read;
+                free(file_buffer);
+            }
+            fclose(local_file);
+            std::cout<< "DOWNLOADING: Done " << 100 <<"%   \r" << std::flush;
+            std::cout << "\nFile saved" <<std::endl;
+            goto get_input;
+        } else if (user_command.substr(0,4) == "SEND"){
+            std::cout << "Client: Warning, I dont think the server is expecting a SEND command!"<< std::endl;
+        }
+
+        if (user_command.substr(0,4) == "STOR"){
+            std::string local_name{};
+            size_t local_size = 0;
+            std::cout << "Enter name of file to upload: "<<std::flush;
+            std::getline(std::cin,local_name);
+            if(access(local_name.c_str(), R_OK) != 0){
+                std::cout<< "CLIENT: Error opening file: " << strerror(errno) <<std::endl;
+                goto get_input;
+            }
+            struct stat file_stats{};
+            if(stat(local_name.c_str(), &file_stats) == 0){
+                local_size = file_stats.st_size;
+                if((file_stats.st_mode & S_IFMT) != S_IFREG){
+                    std::cout << "Error, not a file"<<std::endl;
+                    goto get_input;
+                }
+            } else{
+                std::cout << "Error getting size of the file: " << strerror(errno) <<std::endl;
+                goto get_input;
+            }
+
+            // Send the users command
+            send(connection_socket, user_command.c_str(), strlen(user_command.c_str())+1, 0);
+            memset(recv_buffer, 0, BUFFER_LEN);
+            // Read response
+            if(read(connection_socket, recv_buffer, BUFFER_LEN - 1) <= 0){
+                perror("Socket error");
+                exit(EXIT_FAILURE);
+            }
+            last_response = recv_buffer;
+            std::cout << recv_buffer << std::endl;
+            if(last_response[0]=='+'){
+                // Response was OK, sending size
+                std::cout<<"Will upload " << local_size << " bytes to server"<<std::endl;
+                send(connection_socket, std::to_string(local_size).c_str(), strlen(std::to_string(local_size).c_str())+1,0);
+                // Wait for size confirmation..
+                if(read(connection_socket, recv_buffer, BUFFER_LEN - 1) <= 0){
+                    perror("Socket error");
+                    exit(EXIT_FAILURE);
+                }
+                last_response = recv_buffer;
+                std::cout << recv_buffer << std::endl;
+                if(last_response[0] == '+'){
+                    // Size ok, upload.
+                    size_t remaining = local_size;
+                    FILE *up_file = fopen(local_name.c_str(), "r");
+                    while (remaining > 0){
+                        // Inform the user ofc
+                        std::cout << "UPLOADING: Done: "<<(int)((((float )(local_size-remaining))/((float)local_size))*100)<<"%   \r"<<std::flush;
+
+                        size_t actually_allocated = MIN(1000000,remaining);
+                        char* buffer = (char*) calloc(actually_allocated, sizeof(char));
+                        if(!buffer){
+                            perror("Allocation error");
+                            exit(EXIT_FAILURE);
+                        }
+                        size_t read = fread(buffer, sizeof(char), actually_allocated, up_file);
+                        remaining -= read;
+                        size_t tb_sent = read;
+                        while(tb_sent > 0){
+                            size_t sent = send(connection_socket, buffer, read, 0);
+                            tb_sent-=sent;
+                        }
+                        free(buffer);
+                    }
+                    std::cout<<"UPLOADING: Done: 100%     "<<std::endl;
+                    fclose(up_file);
+                    goto recv_response;
+                }else{
+                    // Size not ok, back to user
+                    goto get_input;
+                }
+
+            }else{
+                //Response not OK, back to user
+                goto get_input;
+            }
+        }
+
+        send(connection_socket, user_command.c_str(), strlen(user_command.c_str())+1, 0);
+        if (user_command.substr(0,4) == "DONE"){
+            break;
+        }
+        recv_response:
+        memset(recv_buffer,0,BUFFER_LEN);
     }
-    std::cout << recv_buffer << std::endl;
 
+    std::cerr << "Server closed connection" << std::endl;
 
+    freeaddrinfo(result_address);
     close(connection_socket);
     return EXIT_SUCCESS;
 }

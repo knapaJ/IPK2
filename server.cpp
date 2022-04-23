@@ -8,16 +8,163 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <netdb.h>
+#include <getopt.h>
+#include <map>
+#include <fstream>
+#include <array>
 
 #include "debug-headers.h"
 #include "serve_client.h"
 
 #define CLIENT_QUEUE_LEN 3
-#define STDIN_FD 0
-#define MAX(a,b) a > b ? a : b
 
 
-int main() {
+void print_help(){
+    std::cout << "Usage:\n"
+                 "-i <interface>, --interface <interface>               Define interface to listen on (opotional)\n"
+                 "-p <number>, --port <number>                          Define port number to listen on (optional)\n"
+                 "                 -Please note, choosing low port number (like the default 115) might\n"
+                 "                  require superuser privileges.\n"
+                 "-u <file_path>, --users <file_path>                   Define file with user database\n"
+                 "-f <path>, --folder <path>                            Specify the working directory of the server"
+                 << std::endl;
+    exit(EXIT_SUCCESS);
+}
+
+std::map<std::string, std::string> parse_user_db(char *user_db_file_path){
+    std::map<std::string, std::string> ret{};
+
+    //first open file
+    std::ifstream user_db_file(user_db_file_path);
+    if(!user_db_file.is_open()){
+        std::cerr << "Cannot open user_db_file file" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    std::string line;
+    while(std::getline(user_db_file, line)){
+        //We get a line, we have to split it by ':' to get the format <username>:<password>
+        unsigned long int pos = 0;
+        std::string username{};
+        std::string password{};
+        for (int i = 0;(pos = line.find(':')) != std::string::npos; i++){
+            std::string token = line.substr(0,pos);
+            line.erase(0, pos + 1);
+            if(i==0){
+                username = token;
+                continue;
+            }
+            std::cerr << "Bad user database format!" << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        password = line; // the rest on the line
+
+        //Now we have user and his password, let's pair them together and store them in the map.
+        ret.insert(std::pair<std::string, std::string>(username, password));
+    }
+
+    user_db_file.close();
+
+    return ret;
+}
+
+int main(int argc, char **argv) {
+    int opt_run_once = 0;
+    char * interface_name = nullptr;
+    char * port_str = nullptr;
+    char * users_db_path = nullptr;
+    char * work_dir = nullptr;
+
+    //First define args
+    struct option long_opts[] = {
+            {"debug", no_argument, &opt_run_once, 1},
+            {"interface", required_argument, nullptr, 'i'},
+            {"port", required_argument, nullptr, 'p'},
+            {"users", required_argument, nullptr, 'u'},
+            {"folder", required_argument, nullptr, 'f'},
+            {nullptr, 0, nullptr, 0}
+    };
+
+    //now we can parse them
+    int arg_cur = '\0';
+    while((arg_cur = getopt_long(argc,argv,"i:p:u:f:", long_opts, nullptr)) != -1){
+        switch(arg_cur){
+            case 0:
+                break;
+            case 'i':
+                std::cerr << "Setting interface to " << optarg << std::endl;
+                interface_name = optarg;
+                break;
+            case 'p':
+                std::cout << "Setting port to " << optarg << std::endl;
+                port_str = optarg;
+                break;
+            case 'u':
+                std::cerr << "Setting user_db file to " << optarg << std::endl;
+                users_db_path = optarg;
+                break;
+            case 'f':
+                std::cerr << "Setting folder to " << optarg << std::endl;
+                work_dir = optarg;
+                break;
+            case '?':
+                print_help();
+                break;
+            default:
+                std::cerr << "Unknown error parsing arguments" << std::endl;
+                exit(EXIT_FAILURE);
+        }
+    }
+
+    if(!(work_dir && users_db_path)){
+        print_help();
+    }
+    // Ok so we got all the arguments we need, so let's verify them
+    // First let's see if we got an interface, else bind to all
+    unsigned int interface_index = 0; // bind to all
+    if (interface_name){
+        if ((interface_index = if_nametoindex(interface_name)) == 0){
+            perror("Error binding to interface");
+
+            std::cout << "List of all available interfaces:" << std::endl;
+
+            struct if_nameindex *if_list;
+            if ( (if_list = if_nameindex()) != nullptr){
+                for (struct if_nameindex *if_desc = if_list; if_desc->if_index != 0 || if_desc->if_name != nullptr; if_desc++){
+                    std::cout << if_desc->if_name <<std::endl;
+                }
+                if_freenameindex(if_list);
+            }else{
+                std::cerr << "Error printing all interfaces" <<std::endl;
+            }
+
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Lets check port number
+    unsigned short port_number = 115; // 115 by default
+    if(port_str){
+        uint port_no_temp = strtoul(port_str, nullptr, 0);
+        if(port_no_temp > UINT16_MAX){
+            std::cout << port_no_temp << " is not a valid port number. <0-" << UINT16_MAX << ">" <<std::endl;
+            exit(EXIT_FAILURE);
+        }
+        port_number = (unsigned short ) port_no_temp;
+    }
+
+    //Parse user database
+    std::map<std::string, std::string> user_db = parse_user_db(users_db_path);
+
+    // Only thing remaining is to change our work directory
+    if(chdir(work_dir) == -1){
+        perror("Error opening directory");
+        exit(EXIT_FAILURE);
+    }
+
+
+
+
     // This site has been used as a reference: https://www.ibm.com/docs/en/i/7.2?topic=sscaaiic-example-accepting-connections-from-both-ipv6-ipv4-clients
     // But this code is in no shape or form a copy, more like a loose interpretation.
 
@@ -27,16 +174,9 @@ int main() {
     memset(&listening_address, 0, sizeof(listening_address));
     listening_address.sin6_addr = in6addr_any;
     listening_address.sin6_family = AF_INET6;
-    listening_address.sin6_port = htons(SERVER_PORT);
-    listening_address.sin6_scope_id = 0;
-    listening_address.sin6_scope_id = if_nametoindex("lo");
+    listening_address.sin6_port = htons(port_number);
+    listening_address.sin6_scope_id = interface_index;
 
-    char int_name_buffer[IF_NAMESIZE];
-    if(!if_indextoname(listening_address.sin6_scope_id, int_name_buffer)){
-        perror("Interface unknown");
-        strcpy(int_name_buffer, "?");
-    }
-    std::cerr << "Setting socket to bind to interface " << int_name_buffer << std::endl;
 
     int server_socket = -1;
 
@@ -94,13 +234,17 @@ int main() {
         clientInfo.ip_str = client_ip_str;
         clientInfo.port = ntohs(client_address.sin6_port);
 
-        serve_client(&clientInfo);
+        serve_client(&clientInfo, user_db);
 
 
         close(client_socket);
 
         std::cerr << "Connection to " << client_ip_str << " closed" << std::endl;
 
+        if(opt_run_once){
+            std::cerr << "Debug flag set, closing after one connection."<<std::endl;
+            break;
+        }
     }
 
 
