@@ -134,7 +134,7 @@ int serve_client(const client_info_t *clientInfo, const std::map<std::string, st
 
                     struct dirent **dir_list;
                     int n;
-                    if((n = scandir(".", &dir_list, NULL, alphasort)) == -1){
+                    if((n = scandir( directory.c_str(), &dir_list, NULL, alphasort)) == -1){
                         message = "-Error listing directory ";
                         message+= directory;
                         message+= ": ";
