@@ -1,0 +1,1 @@
+/usr/bin/c++     CMakeFiles/ipk-simpleftp-client.dir/client.cpp.o  -o ipk-simpleftp-client 

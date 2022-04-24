@@ -1,0 +1,1 @@
+/usr/bin/c++     CMakeFiles/ipk-simpleftp-server.dir/server.cpp.o CMakeFiles/ipk-simpleftp-server.dir/serve_client.cpp.o  -o ipk-simpleftp-server 
