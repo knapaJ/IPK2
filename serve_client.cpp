@@ -37,10 +37,9 @@ typedef enum {
 
 
 bool verify_login(const std::string& username, const std::string& password, std::map<std::string, std::string> user_db){
-    for (auto itr = user_db.find(username); itr != user_db.end(); itr++) {
-        if (itr->second == password){
-            return true;
-        }
+    auto pos = user_db.find(username);
+    if(pos != user_db.end() && pos->second == password){
+        return true;
     }
     return false;
 }

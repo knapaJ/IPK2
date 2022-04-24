@@ -21,7 +21,7 @@
 
 void print_help(){
     std::cout << "Usage:\n"
-                 "-i <interface>, --interface <interface>               Define interface to listen on (opotional)\n"
+                 "-i <interface>, --interface <interface>               Define interface to listen on (optional)\n"
                  "-p <number>, --port <number>                          Define port number to listen on (optional)\n"
                  "                 -Please note, choosing low port number (like the default 115) might\n"
                  "                  require superuser privileges.\n"

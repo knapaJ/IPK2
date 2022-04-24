@@ -138,6 +138,8 @@ int main(int argc, char ** argv){
         exit(EXIT_FAILURE);
     }
 
+    std::cout << "SimpleFTP client by xknapo05\nSuccessfully connected to " << address_str <<
+    "\nPrompt is '>?'" << std::endl;
 
     /**************************************************/
     /* Now we have successfully opened our socket and */
