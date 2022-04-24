@@ -12,6 +12,7 @@
 #include <map>
 #include <fstream>
 #include <array>
+#include <signal.h>
 
 #include "debug-headers.h"
 #include "serve_client.h"
@@ -68,6 +69,11 @@ std::map<std::string, std::string> parse_user_db(char *user_db_file_path){
     return ret;
 }
 
+void handleSigInt(int dum){
+    std::cerr << "Caught SIGINT - exiting" <<std::endl;
+    exit(EXIT_SUCCESS);
+}
+
 int main(int argc, char **argv) {
     int opt_run_once = 0;
     char * interface_name = nullptr;
@@ -96,7 +102,7 @@ int main(int argc, char **argv) {
                 interface_name = optarg;
                 break;
             case 'p':
-                std::cout << "Setting port to " << optarg << std::endl;
+                std::cerr << "Setting port to " << optarg << std::endl;
                 port_str = optarg;
                 break;
             case 'u':
@@ -211,9 +217,17 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    std::cerr << "Setting up SIGINT handler" <<std::endl;
+    signal(SIGINT, handleSigInt);
 
     while(true){
         std::cerr << "Waiting for connection" << std::endl;
+        // Reset workdir, if the previous user changed it
+        if(chdir(work_dir) == -1){
+            perror("Error opening directory");
+            exit(EXIT_FAILURE);
+        }
+
         int client_socket = -1;
         struct sockaddr_in6 client_address{};
         int client_address_len = sizeof (client_address);
